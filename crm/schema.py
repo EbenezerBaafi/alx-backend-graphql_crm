@@ -1,30 +1,38 @@
 import graphene
 from graphene_django import DjangoObjectType
+from graphene_django.filter import DjangoFilterConnectionField
 from django.db import transaction
 from django.core.validators import validate_email
 from django.core.exceptions import ValidationError
 from decimal import Decimal
 import re
 from .models import Customer, Product, Order
+from .filters import CustomerFilter, ProductFilter, OrderFilter
 
 
-# Define Object Types
+# Define Object Types with relay support for filtering
 class CustomerType(DjangoObjectType):
     class Meta:
         model = Customer
         fields = '__all__'
+        filterset_class = CustomerFilter
+        interfaces = (graphene.relay.Node,)
 
 
 class ProductType(DjangoObjectType):
     class Meta:
         model = Product
         fields = '__all__'
+        filterset_class = ProductFilter
+        interfaces = (graphene.relay.Node,)
 
 
 class OrderType(DjangoObjectType):
     class Meta:
         model = Order
         fields = '__all__'
+        filterset_class = OrderFilter
+        interfaces = (graphene.relay.Node,)
 
 
 # Helper function to validate phone format
@@ -303,20 +311,62 @@ class Mutation(graphene.ObjectType):
     create_order = CreateOrder.Field()
 
 
-# Define Query class (you may need to add queries here)
+# Define Query class with filtering support
 class Query(graphene.ObjectType):
-    all_customers = graphene.List(CustomerType)
-    all_products = graphene.List(ProductType)
-    all_orders = graphene.List(OrderType)
+    # Use DjangoFilterConnectionField for relay-style filtering
+    all_customers = DjangoFilterConnectionField(
+        CustomerType,
+        orderBy=graphene.List(graphene.String)
+    )
+    all_products = DjangoFilterConnectionField(
+        ProductType,
+        orderBy=graphene.List(graphene.String)
+    )
+    all_orders = DjangoFilterConnectionField(
+        OrderType,
+        orderBy=graphene.List(graphene.String)
+    )
+    
+    # Single object queries
+    customer = graphene.relay.Node.Field(CustomerType)
+    product = graphene.relay.Node.Field(ProductType)
+    order = graphene.relay.Node.Field(OrderType)
 
-    def resolve_all_customers(self, info):
-        return Customer.objects.all()
+    def resolve_all_customers(self, info, **kwargs):
+        """
+        Resolve all customers with optional filtering and ordering.
+        """
+        order_by = kwargs.get('orderBy', None)
+        queryset = Customer.objects.all()
+        
+        if order_by:
+            queryset = queryset.order_by(*order_by)
+        
+        return queryset
 
-    def resolve_all_products(self, info):
-        return Product.objects.all()
+    def resolve_all_products(self, info, **kwargs):
+        """
+        Resolve all products with optional filtering and ordering.
+        """
+        order_by = kwargs.get('orderBy', None)
+        queryset = Product.objects.all()
+        
+        if order_by:
+            queryset = queryset.order_by(*order_by)
+        
+        return queryset
 
-    def resolve_all_orders(self, info):
-        return Order.objects.all()
+    def resolve_all_orders(self, info, **kwargs):
+        """
+        Resolve all orders with optional filtering and ordering.
+        """
+        order_by = kwargs.get('orderBy', None)
+        queryset = Order.objects.all().select_related('customer').prefetch_related('products')
+        
+        if order_by:
+            queryset = queryset.order_by(*order_by)
+        
+        return queryset
 
 
 # Create schema
